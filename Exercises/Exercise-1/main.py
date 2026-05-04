@@ -19,10 +19,10 @@ download_uris = [
     "https://divvy-tripdata.s3.amazonaws.com/Divvy_Trips_2220_Q1.zip",
 ]
 
-async def download_file(uri, path):
+async def download_file(session, semaphore, uri, path):
     """Uses aiohttp to asynchronously download files"""
     try:
-        async with aiohttp.ClientSession(raise_for_status=True) as session:
+        async with semaphore:
             async with session.get(uri) as response:
                 if "content-disposition" in response.headers:
                     header = response.headers["content-disposition"]
@@ -31,26 +31,34 @@ async def download_file(uri, path):
                     filename = uri.split("/")[-1]
                 full_path = path / filename
                 if full_path.is_file():
-                    logger.info(f"File already exists. Skipping download.")
+                    logger.info(f"File {filename} already exists. Skipping download.")
                 else:
                     with open(full_path, 'wb') as file:
                         while True:
-                            chunk = await response.content.read()
+                            chunk = await response.content.read(8192)
                             if not chunk:
                                 break
                             file.write(chunk)
                         logger.info(f"Downloaded file {filename}")
     except aiohttp.ClientResponseError as e:
-        print(f"HTTP Error: {e.status}")
+        logger.error(f"HTTP Error {e.status} for {uri}: {e.message}")
+    except aiohttp.ClientConnectorError as e: # Specific error for connection issues
+        logger.error(f"Connection Error for {uri}: {e}")
     except aiohttp.ClientError as e:
-        print(f"Client Error: {e}")
+        logger.error(f"Client Error for {uri}: {e}")
     except asyncio.TimeoutError:
-        print("Request timed out")
+        logger.error(f"Request timed out for {uri}")
+    except Exception as e: # Catch any other unexpected errors
+        logger.error(f"An unexpected error occurred during download of {uri}: {e}")
 
-async def multiple_download(uri_list, path):
+async def multiple_download(uri_list, path, max_concurrent_downloads=5):
     """Uses asyncio to run download_file."""
-    tasks = [download_file(uri, path) for uri in uri_list]
-    await asyncio.gather(*tasks)
+    logger.info("Start downloading Zip-Files asynchronously")
+    semaphore = asyncio.Semaphore(max_concurrent_downloads) # Create semaphore
+    async with aiohttp.ClientSession(raise_for_status=True) as session:
+        tasks = [download_file(session, semaphore, uri, path) for uri in uri_list]
+        await asyncio.gather(*tasks)
+    logger.info("Finished downloading Zip-Files asynchronously")
 
 def unzip(zip_directory, target_directory):
     """Unzip files in directory"""
@@ -71,14 +79,14 @@ def main():
     logging.basicConfig(level=logging.INFO)
     
     # create folder downloads if not exists
-    p = Path("downloads/zip/")
-    p.mkdir(parents=True, exist_ok=True)
+    zip_download_path = Path("downloads/zip/")
+    zip_download_path.mkdir(parents=True, exist_ok=True)
 
     # http_download(download_uris=download_uris)
 
-    asyncio.run(multiple_download(uri_list=download_uris, path=p))
+    asyncio.run(multiple_download(uri_list=download_uris, path=zip_download_path))
 
-    unzip(zip_directory=p,target_directory=p.parent)
+    unzip(zip_directory=zip_download_path,target_directory=zip_download_path.parent)
 
 if __name__ == "__main__":
     main()
