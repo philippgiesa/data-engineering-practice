@@ -1,7 +1,5 @@
 import requests
 import logging 
-import aiohttp
-import asyncio
 
 from zipfile import ZipFile
 from io import BytesIO
@@ -19,38 +17,34 @@ download_uris = [
     "https://divvy-tripdata.s3.amazonaws.com/Divvy_Trips_2220_Q1.zip",
 ]
 
-async def download_file(uri, path):
-    """Uses aiohttp to asynchronously download files"""
-    try:
-        async with aiohttp.ClientSession(raise_for_status=True) as session:
-            async with session.get(uri) as response:
-                if "content-disposition" in response.headers:
-                    header = response.headers["content-disposition"]
-                    filename = header.split("filename=")[1]
-                else:
-                    filename = uri.split("/")[-1]
-                full_path = path / filename
-                if full_path.is_file():
-                    logger.info(f"File already exists. Skipping download.")
-                else:
-                    with open(full_path, 'wb') as file:
-                        while True:
-                            chunk = await response.content.read()
-                            if not chunk:
-                                break
-                            file.write(chunk)
-                        logger.info(f"Downloaded file {filename}")
-    except aiohttp.ClientResponseError as e:
-        print(f"HTTP Error: {e.status}")
-    except aiohttp.ClientError as e:
-        print(f"Client Error: {e}")
-    except asyncio.TimeoutError:
-        print("Request timed out")
 
-async def multiple_download(uri_list, path):
-    """Uses asyncio to run download_file."""
-    tasks = [download_file(uri, path) for uri in uri_list]
-    await asyncio.gather(*tasks)
+def http_download(download_uris):
+    """Download and extract zipfiles from http source using requests and zipfile packages."""
+    logger.info("Start downloading and extracting Zip-Files")
+    
+    for uri in download_uris:
+        filename_zip = uri.rsplit("/",1)[1]
+        directory = Path("downloads/zip")
+        full_path = directory / filename_zip
+
+        if full_path.is_file():
+            logger.info(f"File already exists. Skipping download.")
+        else:
+            try:
+                logger.info(f"Start download for file from uri {uri}...")
+                # get one file
+                response = requests.get(uri, stream=True)
+                response.raise_for_status()
+            
+                with open(full_path, 'wb') as file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        file.write(chunk)
+                logger.info(f"...successfully downloaded file from uri {uri}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error downloading file: {e}")
+        
+    logger.info("Finished downloading and extracting Zip-Files")
+
 
 def unzip(zip_directory, target_directory):
     """Unzip files in directory"""
@@ -67,6 +61,7 @@ def unzip(zip_directory, target_directory):
                     logger.info(f"File {file} is extracted to location {target_directory}")
                     filezip.extract(member=filename, path=target_directory)
 
+
 def main():
     logging.basicConfig(level=logging.INFO)
     
@@ -74,11 +69,14 @@ def main():
     p = Path("downloads/zip/")
     p.mkdir(parents=True, exist_ok=True)
 
-    # http_download(download_uris=download_uris)
-
-    asyncio.run(multiple_download(uri_list=download_uris, path=p))
+    http_download(download_uris=download_uris)
 
     unzip(zip_directory=p,target_directory=p.parent)
+
+    
+
+
+
 
 if __name__ == "__main__":
     main()
