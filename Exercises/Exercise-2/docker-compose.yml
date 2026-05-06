@@ -1,12 +1,14 @@
-version: "3.9"
+version: "3.12"
 services:
   test:
     image: "exercise-2"
     volumes:
-      - .:/app
+      - .:/app:Z
+      - /app/.venv
     command: python3 -m pytest
   run:
     image: "exercise-2"
     volumes:
-      - .:/app
+      - .:/app:Z
+      - /app/.venv
     command: python3 main.py
